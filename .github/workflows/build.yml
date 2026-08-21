@@ -1,4 +1,4 @@
-name: Build DEB Package
+name: Build DEB & TIPA Package
 
 on:
   push:
@@ -18,6 +18,31 @@ jobs:
       - name: Prepare Theos
         uses: wwg135/theos-action@v1
 
+      - name: Install ldid (pseudo-sign tool)
+        run: |
+          # 从 Homebrew 安装 ldid（macOS）或从源码编译（Linux）
+          if command -v brew &> /dev/null; then
+            brew install ldid 2>/dev/null || true
+          else
+            # Linux: 下载预编译的 ldid
+            sudo apt-get update -qq && sudo apt-get install -y -qq libplist-dev libssl-dev 2>/dev/null || true
+            git clone https://github.com/xerub/ldid.git /tmp/ldid-build 2>/dev/null || true
+            if [ -d /tmp/ldid-build ]; then
+              cd /tmp/ldid-build
+              make -j$(nproc) 2>/dev/null || g++ -o ldid ldid.cpp -I. -x c lookup2.c -lplist -lcrypto -lxml2 -lz 2>/dev/null || true
+              if [ -f ldid ]; then
+                sudo cp ldid /usr/local/bin/ldid
+                sudo chmod +x /usr/local/bin/ldid
+              fi
+            fi
+          fi
+          # 验证 ldid
+          if command -v ldid &> /dev/null; then
+            echo "ldid installed: $(ldid 2>&1 | head -1)"
+          else
+            echo "WARNING: ldid not available, will skip pseudo-signing"
+          fi
+
       - name: Build rootless package
         run: |
           export THEOS=${{ github.workspace }}/theos
@@ -25,20 +50,65 @@ jobs:
           make clean THEOS=$THEOS
           make package FINALPACKAGE=1 THEOS=$THEOS THEOS_PACKAGE_SCHEME=rootless
 
-      - name: Upload Artifact
+      - name: Package TIPA
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          # 找到编译好的 .app 目录
+          APP_PATH=$(find .theos -name "AppWiperUI.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: AppWiperUI.app not found"
+            find .theos -name "*.app" -type d
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+
+          # 创建 TIPA 目录结构（TrollStore 格式）
+          mkdir -p tipa/Payload
+          cp -R "$APP_PATH" tipa/Payload/
+
+          # 伪签名（带 entitlements，确保在 TrollStore 下权限正确）
+          if command -v ldid &> /dev/null; then
+            ENTITLEMENTS="${{ github.workspace }}/App/entitlements.plist"
+            if [ -f "$ENTITLEMENTS" ]; then
+              echo "Signing with entitlements..."
+              ldid -S"$ENTITLEMENTS" tipa/Payload/AppWiperUI.app/AppWiperUI
+            else
+              echo "Signing without entitlements..."
+              ldid -S tipa/Payload/AppWiperUI.app/AppWiperUI
+            fi
+            echo "Sign done."
+          else
+            echo "WARNING: ldid not found, skipping pseudo-sign"
+          fi
+
+          # 打包成 .tipa（本质是 zip）
+          cd tipa
+          zip -r ../AppWiperUI-v2.08.tipa Payload
+          cd ..
+          ls -lh AppWiperUI-v2.08.tipa
+
+      - name: Upload DEB Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AppWiper-Rootless-DEB
           path: ${{ github.workspace }}/packages/*.deb
 
-      - name: Commit deb to repo
+      - name: Upload TIPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppWiperUI-TIPA
+          path: ${{ github.workspace }}/AppWiperUI-v2.08.tipa
+
+      - name: Commit packages to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/*.deb || true
+          mkdir -p packages
+          cp AppWiperUI-v2.08.tipa packages/ 2>/dev/null || true
+          git add packages/*.deb packages/*.tipa || true
           if git diff --cached --quiet; then
-            echo "No deb to commit"
+            echo "No packages to commit"
           else
-            git commit -m "CI: Auto-build AppWiper rootless deb [skip ci]"
+            git commit -m "CI: Auto-build AppWiper (deb + tipa) [skip ci]"
             git push
           fi
