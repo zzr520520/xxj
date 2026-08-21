@@ -244,15 +244,16 @@
             editableCell.textField.tag = 100 + indexPath.row;
             editableCell.textField.delegate = self;
             __weak typeof(self) weakSelf = self;
+            __weak EditableCell *weakCell = editableCell;
             editableCell.randomAction = ^{
                 if (indexPath.row == 0) {
                     weakSelf.inputSSID = [NSString stringWithFormat:@"WiFi-%04X", arc4random_uniform(0xFFFF)];
-                    editableCell.textField.text = weakSelf.inputSSID;
+                    weakCell.textField.text = weakSelf.inputSSID;
                 } else {
                     weakSelf.inputBSSID = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
                                            arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
                                            arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
-                    editableCell.textField.text = weakSelf.inputBSSID;
+                    weakCell.textField.text = weakSelf.inputBSSID;
                 }
             };
             return editableCell;
@@ -268,6 +269,7 @@
             editableCell.textField.tag = 200 + indexPath.row;
             editableCell.textField.delegate = self;
             __weak typeof(self) weakSelf = self;
+            __weak EditableCell *weakCell = editableCell;
             // 每个定位参数独立随机生成按钮
             editableCell.randomAction = ^{
                 double lat = 21.0 + (double)arc4random()/UINT32_MAX * 18.0;
@@ -275,13 +277,13 @@
                 double radius = 1.0 + (double)arc4random()/UINT32_MAX * 20.0;
                 if (indexPath.row == 0) {
                     weakSelf.inputLat = [NSString stringWithFormat:@"%.4f", lat];
-                    editableCell.textField.text = weakSelf.inputLat;
+                    weakCell.textField.text = weakSelf.inputLat;
                 } else if (indexPath.row == 1) {
                     weakSelf.inputLon = [NSString stringWithFormat:@"%.4f", lon];
-                    editableCell.textField.text = weakSelf.inputLon;
+                    weakCell.textField.text = weakSelf.inputLon;
                 } else {
                     weakSelf.inputRadius = [NSString stringWithFormat:@"%.1f", radius];
-                    editableCell.textField.text = weakSelf.inputRadius;
+                    weakCell.textField.text = weakSelf.inputRadius;
                 }
             };
             return editableCell;
@@ -306,12 +308,13 @@
                 editableCell.textField.tag = 300;
                 editableCell.textField.delegate = self;
                 __weak typeof(self) weakSelf = self;
+                __weak EditableCell *weakCell = editableCell;
                 editableCell.randomAction = ^{
                     NSArray *versions = @[@"17.4", @"17.3", @"17.2", @"17.1", @"16.6", @"16.5", @"16.4"];
                     NSString *ver = versions[arc4random_uniform((uint32_t)versions.count)];
                     weakSelf.inputUA = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
                                         [ver stringByReplacingOccurrencesOfString:@"." withString:@"_"]];
-                    editableCell.textField.text = weakSelf.inputUA;
+                    weakCell.textField.text = weakSelf.inputUA;
                 };
                 return editableCell;
             }
@@ -401,6 +404,57 @@
     return YES;
 }
 
+#pragma mark - 生成随机设备配置
+- (NSDictionary *)generateSeedProfile {
+    // 随机选择设备型号
+    NSArray *machines = @[
+        @"iPhone15,2", @"iPhone15,3", @"iPhone15,4", @"iPhone15,5",
+        @"iPhone14,5", @"iPhone14,6", @"iPhone14,7", @"iPhone14,8",
+        @"iPhone13,2", @"iPhone13,3", @"iPhone13,4",
+        @"iPhone12,1", @"iPhone12,3",
+    ];
+    NSString *machine = machines[arc4random_uniform((uint32_t)machines.count)];
+    NSDictionary *devInfo = [DeviceModels deviceInfoForMachine:machine];
+    
+    // 随机序列号
+    NSString *serial = [NSString stringWithFormat:@"F%@%@", 
+        [NSString stringWithFormat:@"%c", (unichar)('A' + arc4random_uniform(26))],
+        [NSString stringWithFormat:@"%011u", arc4random_uniform(999999999)]];
+    
+    // 随机 ECID
+    NSString *ecid = [NSString stringWithFormat:@"%016llX", (unsigned long long)arc4random() << 32 | arc4random()];
+    
+    // 随机 WiFi MAC
+    NSString *wifiMAC = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
+        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
+        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
+    
+    // 随机 Bluetooth MAC
+    NSString *btMAC = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
+        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
+        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
+    
+    return @{
+        @"MachineModel": machine,
+        @"DisplayName": devInfo[@"marketing_name"] ?: machine,
+        @"DeviceName": devInfo[@"marketing_name"] ?: @"iPhone",
+        @"ProductName": @"iPhone OS",
+        @"ModelNumber": devInfo[@"hw_model"] ?: @"D73",
+        @"HardwareModel": machine,
+        @"SerialNumber": serial,
+        @"ECID": ecid,
+        @"UniqueDeviceID": [NSUUID UUID].UUIDString,
+        @"WifiAddress": wifiMAC,
+        @"BluetoothAddress": btMAC,
+        @"ProductType": machine,
+        @"BoardId": @(arc4random_uniform(20)),
+        @"ChipId": @(arc4random_uniform(100)),
+        @"SOC": devInfo[@"soc"] ?: @"A16",
+        @"CPUCore": devInfo[@"cpu_cores"] ?: @(6),
+        @"PhysMem": devInfo[@"physmem"] ?: @6442450944,
+    };
+}
+
 #pragma mark - 执行抹机
 - (void)executeWipe {
     if (!self.selectedApp) {
@@ -413,7 +467,7 @@
     NSString *bundleID = self.selectedApp.bundleIdentifier;
     
     // 构建配置
-    NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:GenerateCommercialSeedProfile()];
+    NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:[self generateSeedProfile]];
     config[@"WifiSSID"] = self.inputSSID ?: @"WiFi-0000";
     config[@"WifiBSSID"] = self.inputBSSID ?: @"00:00:00:00:00:00";
     config[@"LocationLat"] = @([self.inputLat doubleValue] ?: 39.9042);

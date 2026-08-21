@@ -3,7 +3,7 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = AppWiperUI
 AppWiperUI_FILES = main.m AppDelegate.m RootViewController.m ../src/WiperHelper.m ../src/WiperSnapshotManager.m ../src/LocationFaker.m ../src/NetworkFaker.m
 AppWiperUI_FRAMEWORKS = UIKit CoreGraphics Foundation AdSupport MobileCoreServices CoreTelephony SystemConfiguration CoreLocation
-AppWiperUI_CFLAGS = -fobjc-arc -I../src -Wno-arc-performSelector-leaks -Wno-deprecated-declarations -Wno-unguarded-availability-new -Wno-unused-variable -Wno-unused-function
+AppWiperUI_CFLAGS = -fobjc-arc -I../src -Wno-arc-performSelector-leaks -Wno-deprecated-declarations -Wno-unguarded-availability-new -Wno-unused-variable -Wno-unused-function -Wno-arc-retain-cycles
 AppWiperUI_LIBRARIES = sqlite3
 AppWiperUI_INFO_PLIST = Info.plist
 AppWiperUI_CODESIGN_FLAGS = -Sentitlements.plist
