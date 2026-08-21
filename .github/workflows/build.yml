@@ -22,33 +22,26 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libplist-dev libssl-dev libxml2-dev zlib1g-dev build-essential
-          # 从源码编译 ldid
           git clone --depth=1 https://github.com/xerub/ldid.git /tmp/ldid-build 2>/dev/null || true
           if [ -d /tmp/ldid-build ]; then
             cd /tmp/ldid-build
-            # 尝试编译
             g++ -std=c++11 -o ldid ldid.cpp -I. -x c lookup2.c -lplist -lcrypto -lxml2 -lz 2>&1 || echo "ldid compile failed"
             if [ -f ldid ]; then
               sudo cp ldid /usr/local/bin/ldid
               sudo chmod +x /usr/local/bin/ldid
-              echo "ldid installed: $(ldid 2>&1 | head -1)"
-            else
-              echo "WARNING: ldid compilation failed, will try alternative"
-              # 备选：下载预编译 ldid
-              curl -sL https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64 -o /tmp/ldid 2>/dev/null || true
-              if [ -f /tmp/ldid ] && [ -s /tmp/ldid ]; then
-                sudo cp /tmp/ldid /usr/local/bin/ldid
-                sudo chmod +x /usr/local/bin/ldid
-                echo "ldid (prebuilt) installed"
-              fi
+              echo "ldid installed"
             fi
           fi
-          # 最终验证
-          if command -v ldid &> /dev/null; then
-            echo "SUCCESS: ldid is available"
-          else
-            echo "WARNING: ldid not available"
+          if ! command -v ldid &> /dev/null; then
+            echo "Trying prebuilt ldid..."
+            curl -sL "https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64" -o /tmp/ldid 2>/dev/null || true
+            if [ -s /tmp/ldid ]; then
+              sudo cp /tmp/ldid /usr/local/bin/ldid
+              sudo chmod +x /usr/local/bin/ldid
+              echo "ldid prebuilt installed"
+            fi
           fi
+          command -v ldid && echo "ldid OK" || echo "ldid NOT available"
 
       - name: Build rootless package
         run: |
@@ -60,8 +53,6 @@ jobs:
       - name: Package TIPA
         run: |
           export THEOS=${{ github.workspace }}/theos
-
-          # 找 .app（优先从 staging 目录）
           APP_PATH=""
           if [ -d ".theos/_/Applications/AppWiperUI.app" ]; then
             APP_PATH=".theos/_/Applications/AppWiperUI.app"
@@ -70,58 +61,39 @@ jobs:
           else
             APP_PATH=$(find .theos -name "AppWiperUI.app" -type d 2>/dev/null | grep -v ".dSYM" | head -1)
           fi
-
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "Error: AppWiperUI.app not found!"
+            echo "ERROR: AppWiperUI.app not found!"
             find . -name "*.app" -type d 2>/dev/null | head -20
             exit 1
           fi
-          echo "Found app at: $APP_PATH"
-          ls -la "$APP_PATH/" | head -20
+          echo "APP_PATH=$APP_PATH"
+          ls -la "$APP_PATH/"
 
-          # 检查 Info.plist
           INFO_PLIST="$APP_PATH/Info.plist"
           if [ ! -f "$INFO_PLIST" ]; then
-            echo "ERROR: Info.plist not found!"
+            echo "ERROR: Info.plist missing!"
             exit 1
           fi
-          echo "Info.plist exists."
+          echo "Info.plist OK"
           file "$INFO_PLIST"
 
-          # 二进制 plist 转 XML（TrollStore 兼容）
+          # 二进制plist转XML
           if file "$INFO_PLIST" | grep -qi "binary"; then
             echo "Converting binary plist to XML..."
-            python3 -c "
-import plistlib
-with open('$INFO_PLIST', 'rb') as f:
-    data = plistlib.load(f)
-with open('$INFO_PLIST', 'wb') as f:
-    plistlib.dump(data, f, fmt=plistlib.FMT_XML)
-print('Converted successfully')
-" || echo "WARNING: plist conversion failed"
+            python3 -c "import plistlib; f=open('$INFO_PLIST','rb'); d=plistlib.load(f); f.close(); f=open('$INFO_PLIST','wb'); plistlib.dump(d,f,fmt=plistlib.FMT_XML); f.close(); print('done')" || echo "plist convert warning"
             file "$INFO_PLIST"
           fi
 
-          # 打印 plist 关键字段验证
-          python3 -c "
-import plistlib
-with open('$INFO_PLIST', 'rb') as f:
-    p = plistlib.load(f)
-keys = ['CFBundleExecutable','CFBundleIdentifier','CFBundleName','CFBundleDisplayName','CFBundleVersion','CFBundleShortVersionString']
-for k in keys:
-    print(f'  {k}: {p.get(k, \"MISSING\")}')
-"
+          # 验证plist关键字段
+          python3 -c "import plistlib; p=plistlib.load(open('$INFO_PLIST','rb')); [print(k+': '+str(p.get(k,'MISSING'))) for k in ['CFBundleExecutable','CFBundleIdentifier','CFBundleName','CFBundleDisplayName','CFBundleVersion','CFBundleShortVersionString']]"
 
-          # 构建 TIPA 标准结构
+          # 构建TIPA结构
           rm -rf tipa_build
           mkdir -p tipa_build/Payload
           cp -R "$APP_PATH" tipa_build/Payload/AppWiperUI.app
-
-          # 验证结构
-          echo "=== Payload structure ==="
-          ls -la tipa_build/Payload/AppWiperUI.app/ | head -20
-          echo "Info.plist in Payload:"
-          ls -la tipa_build/Payload/AppWiperUI.app/Info.plist
+          echo "Payload structure:"
+          ls -la tipa_build/Payload/AppWiperUI.app/
+          test -f tipa_build/Payload/AppWiperUI.app/Info.plist && echo "Info.plist in Payload: YES" || echo "Info.plist in Payload: NO!"
 
           # 伪签名
           if command -v ldid &> /dev/null; then
@@ -132,21 +104,18 @@ for k in keys:
             else
               ldid -S tipa_build/Payload/AppWiperUI.app/AppWiperUI
             fi
-            echo "Signed."
+            echo "Signed"
             ldid -e tipa_build/Payload/AppWiperUI.app/AppWiperUI 2>&1 | head -15 || true
           else
-            echo "WARNING: No ldid, skipping pseudo-sign"
+            echo "WARNING: no ldid"
           fi
 
-          # 打包 tipa (zip)
+          # 打包
           cd tipa_build
           zip -r -X ../AppWiperUI-v2.08.tipa Payload
           cd ..
-
-          # 验证 zip 内容
-          echo "=== TIPA contents ==="
+          echo "TIPA contents:"
           unzip -l AppWiperUI-v2.08.tipa
-          echo ""
           ls -lh AppWiperUI-v2.08.tipa
 
       - name: Upload DEB Artifact
