@@ -22,7 +22,8 @@
 #import "NetworkFaker.h"
 
 #import <Foundation/Foundation.h>
-#import <CoreTelephony/CoreTelephony.h>
+#import <CoreTelephony/CTCarrier.h>
+#import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <dispatch/dispatch.h>
 #import "WiperHelper.h"

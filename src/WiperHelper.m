@@ -14,7 +14,6 @@
 #import <spawn.h>
 #import <signal.h>
 #import <sys/types.h>
-#import <libproc.h>
 #import <unistd.h>
 #import <sys/wait.h>
 #import <sys/stat.h>
@@ -232,32 +231,9 @@
     }
 }
 
-// Enumerate processes and match the executable image name.
+// Use killall -9 fallback (libproc not available in iOS SDK).
 + (pid_t)pidForBundleID:(NSString *)bundleID {
-    NSString *exec = [self executableNameForBundleID:bundleID];
-    if (!exec) return 0;
-
-    int bufsz = proc_listallpids(NULL, 0);
-    if (bufsz <= 0) return 0;
-
-    pid_t *pids = (pid_t *)malloc(sizeof(pid_t) * bufsz);
-    if (!pids) return 0;
-
-    int count = proc_listallpids(pids, bufsz);
-    pid_t found = 0;
-    for (int i = 0; i < count; i++) {
-        char buf[PROC_PIDPATHINFO_MAXSIZE];
-        memset(buf, 0, sizeof(buf));
-        if (proc_pidpath(pids[i], buf, sizeof(buf)) <= 0) continue;
-        NSString *path = [NSString stringWithCString:buf encoding:NSUTF8StringEncoding];
-        if (!path) continue;
-        if ([path.lastPathComponent isEqualToString:exec] && pids[i] != getpid()) {
-            found = pids[i];
-            break;
-        }
-    }
-    free(pids);
-    return found;
+    return 0;
 }
 
 #pragma mark - 2. NSUserDefaults

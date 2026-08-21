@@ -20,8 +20,10 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
-#import <CoreTelephony/CoreTelephony.h>
+#import <CoreTelephony/CTCarrier.h>
+#import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <SystemConfiguration/SystemConfiguration.h>
+#import <SystemConfiguration/CaptiveNetwork.h>
 #import <StoreKit/StoreKit.h>
 #import <AdSupport/AdSupport.h>
 #import <IOKit/IOKitLib.h>
