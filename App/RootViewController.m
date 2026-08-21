@@ -403,7 +403,7 @@ static NSString *AWRandomUUIDUpper(void) {
 - (void)buildLabeledFieldCell:(UITableViewCell *)cell
                        label:(NSString *)labelText
                   placeholder:(NSString *)placeholder
-                    fieldPtr:(UITextField **)fieldPtr {
+                    fieldPtr:(UITextField * __strong *)fieldPtr {
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(15, 15, 70, 20)];
     l.text = labelText;
     l.font = [UIFont systemFontOfSize:15];
@@ -494,7 +494,7 @@ static NSString *AWRandomUUIDUpper(void) {
 - (void)addSwitchCell:(UITableViewCell *)cell
                title:(NSString *)title
                   on:(BOOL)on
-               swPtr:(UISwitch **)swPtr {
+               swPtr:(UISwitch * __strong *)swPtr {
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(15, 14, SCREEN_WIDTH - 95, 22)];
     l.text = title;
     l.font = [UIFont systemFontOfSize:15];
