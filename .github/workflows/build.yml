@@ -18,29 +18,23 @@ jobs:
       - name: Prepare Theos
         uses: wwg135/theos-action@v1
 
-      - name: Install ldid (pseudo-sign tool)
+      - name: Install tools (ldid, plistutil)
         run: |
-          # 从 Homebrew 安装 ldid（macOS）或从源码编译（Linux）
-          if command -v brew &> /dev/null; then
-            brew install ldid 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libplist-dev libssl-dev libxml2-dev zlib1g-dev build-essential git
+          # 编译 ldid
+          git clone --depth=1 https://github.com/xerub/ldid.git /tmp/ldid-build
+          cd /tmp/ldid-build
+          g++ -o ldid ldid.cpp -I. -x c lookup2.c -lplist -lcrypto -lxml2 -lz
+          sudo cp ldid /usr/local/bin/ldid
+          sudo chmod +x /usr/local/bin/ldid
+          echo "ldid version: $(ldid 2>&1 | head -1)"
+          # 安装 plistutil 用于二进制 plist 转换
+          sudo apt-get install -y -qq libplist-utils 2>/dev/null || true
+          if command -v plistutil &> /dev/null; then
+            echo "plistutil available"
           else
-            # Linux: 下载预编译的 ldid
-            sudo apt-get update -qq && sudo apt-get install -y -qq libplist-dev libssl-dev 2>/dev/null || true
-            git clone https://github.com/xerub/ldid.git /tmp/ldid-build 2>/dev/null || true
-            if [ -d /tmp/ldid-build ]; then
-              cd /tmp/ldid-build
-              make -j$(nproc) 2>/dev/null || g++ -o ldid ldid.cpp -I. -x c lookup2.c -lplist -lcrypto -lxml2 -lz 2>/dev/null || true
-              if [ -f ldid ]; then
-                sudo cp ldid /usr/local/bin/ldid
-                sudo chmod +x /usr/local/bin/ldid
-              fi
-            fi
-          fi
-          # 验证 ldid
-          if command -v ldid &> /dev/null; then
-            echo "ldid installed: $(ldid 2>&1 | head -1)"
-          else
-            echo "WARNING: ldid not available, will skip pseudo-signing"
+            echo "plistutil not available, will try alternative"
           fi
 
       - name: Build rootless package
@@ -53,38 +47,106 @@ jobs:
       - name: Package TIPA
         run: |
           export THEOS=${{ github.workspace }}/theos
-          # 找到编译好的 .app 目录
-          APP_PATH=$(find .theos -name "AppWiperUI.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
+
+          # 优先从 staging 目录找 .app（Theos 最终产物在这里）
+          APP_PATH=""
+          if [ -d ".theos/_/Applications/AppWiperUI.app" ]; then
+            APP_PATH=".theos/_/Applications/AppWiperUI.app"
+          elif [ -d "layout/Applications/AppWiperUI.app" ]; then
+            APP_PATH="layout/Applications/AppWiperUI.app"
+          else
+            # 兜底：全盘搜索
+            APP_PATH=$(find .theos -name "AppWiperUI.app" -type d 2>/dev/null | grep -v ".dSYM" | head -1)
+          fi
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
             echo "Error: AppWiperUI.app not found"
-            find .theos -name "*.app" -type d
+            echo "Searching for .app directories..."
+            find . -name "*.app" -type d 2>/dev/null | head -20
             exit 1
           fi
           echo "Found app at: $APP_PATH"
+          echo "=== App bundle contents ==="
+          ls -la "$APP_PATH/"
 
-          # 创建 TIPA 目录结构（TrollStore 格式）
-          mkdir -p tipa/Payload
-          cp -R "$APP_PATH" tipa/Payload/
+          # 检查 Info.plist
+          INFO_PLIST="$APP_PATH/Info.plist"
+          if [ ! -f "$INFO_PLIST" ]; then
+            echo "ERROR: Info.plist not found in app bundle!"
+            exit 1
+          fi
+          echo "Info.plist found."
+          file "$INFO_PLIST"
 
-          # 伪签名（带 entitlements，确保在 TrollStore 下权限正确）
-          if command -v ldid &> /dev/null; then
-            ENTITLEMENTS="${{ github.workspace }}/App/entitlements.plist"
-            if [ -f "$ENTITLEMENTS" ]; then
-              echo "Signing with entitlements..."
-              ldid -S"$ENTITLEMENTS" tipa/Payload/AppWiperUI.app/AppWiperUI
+          # 如果是二进制 plist，转成 XML（TrollStore 兼容）
+          if file "$INFO_PLIST" | grep -qi "binary"; then
+            echo "Converting binary Info.plist to XML..."
+            if command -v plistutil &> /dev/null; then
+              plistutil -i "$INFO_PLIST" -o "${INFO_PLIST}.xml" -f xml
+              mv "${INFO_PLIST}.xml" "$INFO_PLIST"
             else
-              echo "Signing without entitlements..."
-              ldid -S tipa/Payload/AppWiperUI.app/AppWiperUI
+              # 使用 Python 转换
+              python3 -c "
+import plistlib, sys
+with open('$INFO_PLIST', 'rb') as f:
+    data = plistlib.load(f)
+with open('$INFO_PLIST', 'wb') as f:
+    plistlib.dump(data, f, fmt=plistlib.FMT_XML)
+" 2>/dev/null || echo "WARNING: Could not convert plist to XML"
             fi
-            echo "Sign done."
-          else
-            echo "WARNING: ldid not found, skipping pseudo-sign"
+            echo "Converted."
+            file "$INFO_PLIST"
           fi
 
-          # 打包成 .tipa（本质是 zip）
+          # 验证 Info.plist 关键值
+          echo "=== Info.plist keys ==="
+          python3 -c "
+import plistlib
+with open('$INFO_PLIST', 'rb') as f:
+    p = plistlib.load(f)
+for k in ['CFBundleExecutable','CFBundleIdentifier','CFBundleName','CFBundleDisplayName','CFBundleVersion','CFBundleShortVersionString']:
+    print(f'  {k}: {p.get(k, \"MISSING!\")}')
+"
+
+          # 创建标准 TIPA 目录结构
+          rm -rf tipa
+          mkdir -p tipa/Payload
+          cp -R "$APP_PATH" tipa/Payload/AppWiperUI.app
+
+          # 确保目录结构正确
+          echo "=== TIPA structure ==="
+          find tipa -maxdepth 3 -type f -o -type d | sort | head -30
+
+          # 伪签名（带 entitlements）
+          ENTITLEMENTS="${{ github.workspace }}/App/entitlements.plist"
+          echo "=== Signing with ldid ==="
+          if [ -f "$ENTITLEMENTS" ]; then
+            echo "Entitlements file found, signing..."
+            ldid -S"$ENTITLEMENTS" tipa/Payload/AppWiperUI.app/AppWiperUI
+          else
+            echo "No entitlements file, signing with empty..."
+            ldid -S tipa/Payload/AppWiperUI.app/AppWiperUI
+          fi
+          echo "Sign done."
+
+          # 验证签名
+          echo "=== Signature verification ==="
+          ldid -e tipa/Payload/AppWiperUI.app/AppWiperUI 2>&1 | head -20 || true
+
+          # 打包成 .tipa（zip 格式）
           cd tipa
-          zip -r ../AppWiperUI-v2.08.tipa Payload
+          rm -f ../AppWiperUI-v2.08.tipa
+          zip -r -X ../AppWiperUI-v2.08.tipa Payload
           cd ..
+
+          # 验证 TIPA 内容
+          echo "=== TIPA zip contents ==="
+          unzip -l AppWiperUI-v2.08.tipa | head -20
+          echo "..."
+          unzip -l AppWiperUI-v2.08.tipa | tail -5
+
+          echo ""
+          echo "Final TIPA size:"
           ls -lh AppWiperUI-v2.08.tipa
 
       - name: Upload DEB Artifact
