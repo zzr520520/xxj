@@ -53,27 +53,45 @@ jobs:
       - name: Package TIPA
         run: |
           export THEOS=${{ github.workspace }}/theos
+          echo "=== All .app bundles found ==="
+          find . -name "AppWiperUI.app" -type d 2>/dev/null
+          echo ""
+          echo "=== Checking each for Info.plist ==="
           APP_PATH=""
-          if [ -d ".theos/_/Applications/AppWiperUI.app" ]; then
-            APP_PATH=".theos/_/Applications/AppWiperUI.app"
-          elif [ -d "layout/Applications/AppWiperUI.app" ]; then
-            APP_PATH="layout/Applications/AppWiperUI.app"
-          else
-            APP_PATH=$(find .theos -name "AppWiperUI.app" -type d 2>/dev/null | grep -v ".dSYM" | head -1)
+          while IFS= read -r app; do
+            echo "  Checking: $app"
+            ls -la "$app/" 2>/dev/null | head -5
+            if [ -f "$app/Info.plist" ]; then
+              echo "  -> HAS Info.plist!"
+              if [ -z "$APP_PATH" ]; then
+                APP_PATH="$app"
+              fi
+            else
+              echo "  -> no Info.plist (skip)"
+            fi
+          done < <(find . -name "AppWiperUI.app" -type d 2>/dev/null)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No AppWiperUI.app with Info.plist found!"
+            echo "Falling back to first .app found + adding Info.plist manually"
+            APP_PATH=$(find . -name "AppWiperUI.app" -type d 2>/dev/null | head -1)
+            if [ -z "$APP_PATH" ]; then
+              echo "FATAL: No .app found at all!"
+              exit 1
+            fi
+            # 手动复制 Info.plist
+            if [ -f "App/Info.plist" ]; then
+              cp App/Info.plist "$APP_PATH/Info.plist"
+              echo "Copied Info.plist from source"
+            else
+              echo "ERROR: No source Info.plist either!"
+              exit 1
+            fi
           fi
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: AppWiperUI.app not found!"
-            find . -name "*.app" -type d 2>/dev/null | head -20
-            exit 1
-          fi
-          echo "APP_PATH=$APP_PATH"
+          echo "FINAL APP_PATH=$APP_PATH"
           ls -la "$APP_PATH/"
 
           INFO_PLIST="$APP_PATH/Info.plist"
-          if [ ! -f "$INFO_PLIST" ]; then
-            echo "ERROR: Info.plist missing!"
-            exit 1
-          fi
           echo "Info.plist OK"
           file "$INFO_PLIST"
 
