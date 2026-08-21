@@ -26,6 +26,176 @@
 @end
 
 // ============================================================
+// App 选择器（独立页面，带搜索）
+// ============================================================
+@interface AppPickerViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UISearchBar *searchBar;
+@property (nonatomic, strong) NSMutableArray<LSApplicationProxy *> *allApps;
+@property (nonatomic, strong) NSMutableArray<LSApplicationProxy *> *filteredApps;
+@property (nonatomic, copy) void (^onSelected)(LSApplicationProxy *app);
+@end
+
+@implementation AppPickerViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"选择目标应用";
+    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+
+    self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
+    self.searchBar.placeholder = @"搜索应用名称或 Bundle ID";
+    self.searchBar.delegate = self;
+    self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.navigationItem.titleView = self.searchBar;
+
+    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:self.tableView];
+
+    self.allApps = [NSMutableArray array];
+    self.filteredApps = [NSMutableArray array];
+    [self loadApps];
+}
+
+- (void)loadApps {
+    [self.allApps removeAllObjects];
+    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+    if (workspaceClass) {
+        id workspace = [workspaceClass performSelector:NSSelectorFromString(@"defaultWorkspace")];
+        NSArray *all = [workspace performSelector:NSSelectorFromString(@"allInstalledApplications")];
+        for (id app in all) {
+            if ([[app valueForKey:@"applicationType"] isEqualToString:@"User"]) {
+                [self.allApps addObject:app];
+            }
+        }
+    }
+    [self.allApps sortUsingComparator:^NSComparisonResult(LSApplicationProxy *a, LSApplicationProxy *b) {
+        return [a.localizedShortName compare:b.localizedShortName];
+    }];
+    [self filterApps:@""];
+}
+
+- (void)filterApps:(NSString *)keyword {
+    [self.filteredApps removeAllObjects];
+    if (keyword.length == 0) {
+        [self.filteredApps addObjectsFromArray:self.allApps];
+    } else {
+        for (LSApplicationProxy *app in self.allApps) {
+            NSString *name = app.localizedShortName ?: @"";
+            NSString *bid = app.bundleIdentifier ?: @"";
+            if ([name localizedCaseInsensitiveContainsString:keyword] ||
+                [bid localizedCaseInsensitiveContainsString:keyword]) {
+                [self.filteredApps addObject:app];
+            }
+        }
+    }
+    [self.tableView reloadData];
+}
+
+#pragma mark - SearchBar
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
+    [self filterApps:searchText];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    [searchBar resignFirstResponder];
+}
+
+#pragma mark - TableView
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.filteredApps.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    LSApplicationProxy *app = self.filteredApps[indexPath.row];
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    cell.textLabel.text = app.localizedShortName ?: @"未知应用";
+    cell.detailTextLabel.text = app.bundleIdentifier;
+    UIImage *icon = [UIImage _applicationIconImageForBundleIdentifier:app.bundleIdentifier format:2 scale:[UIScreen mainScreen].scale];
+    if (icon) {
+        cell.imageView.image = icon;
+        cell.imageView.layer.cornerRadius = 8;
+        cell.imageView.layer.masksToBounds = YES;
+    }
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    LSApplicationProxy *app = self.filteredApps[indexPath.row];
+    if (self.onSelected) {
+        self.onSelected(app);
+    }
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+@end
+
+// ============================================================
+// 设备型号选择器（独立页面）
+// ============================================================
+@interface DeviceModelPickerViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSArray<NSString *> *allMachines;
+@property (nonatomic, copy) NSString *selectedMachine;
+@property (nonatomic, copy) void (^onSelected)(NSString *machine);
+@end
+
+@implementation DeviceModelPickerViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"选择设备型号";
+    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+
+    self.allMachines = [DeviceModels allMachineIdentifiers];
+
+    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:self.tableView];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.allMachines.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return @"📱 可选设备型号";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *machine = self.allMachines[indexPath.row];
+    NSDictionary *info = [DeviceModels deviceInfoForMachine:machine];
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    cell.textLabel.text = info[@"marketing_name"] ?: machine;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  %@GB", machine, info[@"soc"] ?: @"?", info[@"physmem"] ? [NSString stringWithFormat:@"%.0f", [info[@"physmem"] doubleValue] / 1073741824.0] : @"?"];
+    if (self.selectedMachine && [self.selectedMachine isEqualToString:machine]) {
+        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+    } else {
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *machine = self.allMachines[indexPath.row];
+    self.selectedMachine = machine;
+    if (self.onSelected) {
+        self.onSelected(machine);
+    }
+    [self.navigationController popViewControllerAnimated:YES];
+}
+
+@end
+
+// ============================================================
 // 可编辑的 TableView Cell（带随机按钮）
 // ============================================================
 @interface EditableCell : UITableViewCell
@@ -39,16 +209,14 @@
     self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if (self) {
         self.selectionStyle = UITableViewCellSelectionStyleNone;
-        
-        // 文本输入框
+
         self.textField = [[UITextField alloc] init];
         self.textField.font = [UIFont systemFontOfSize:15];
         self.textField.textColor = [UIColor labelColor];
         self.textField.autocorrectionType = UITextAutocorrectionTypeNo;
         self.textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
         [self.contentView addSubview:self.textField];
-        
-        // 随机按钮
+
         self.randomButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [self.randomButton setTitle:@"🎲 随机" forState:UIControlStateNormal];
         self.randomButton.titleLabel.font = [UIFont systemFontOfSize:13];
@@ -83,9 +251,9 @@
 // ============================================================
 @interface RootViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) NSMutableArray<LSApplicationProxy *> *apps;
 @property (nonatomic, strong) LSApplicationProxy *selectedApp;
-@property (nonatomic, strong) NSMutableDictionary *params; // 存储所有参数
+@property (nonatomic, copy) NSString *selectedMachine;
+@property (nonatomic, strong) NSMutableDictionary *params;
 
 // 参数缓存
 @property (nonatomic, copy) NSString *inputSSID;
@@ -94,7 +262,7 @@
 @property (nonatomic, copy) NSString *inputLon;
 @property (nonatomic, copy) NSString *inputRadius;
 @property (nonatomic, copy) NSString *inputUA;
-@property (nonatomic, assign) NSInteger selectedNetworkMode; // 0-6
+@property (nonatomic, assign) NSInteger selectedNetworkMode;
 @property (nonatomic, assign) BOOL bypassIAP;
 @property (nonatomic, assign) BOOL jailbreakHide;
 @property (nonatomic, assign) BOOL uaToggle;
@@ -105,126 +273,104 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"抹机伪装";
-    self.apps = [NSMutableArray array];
     self.params = [NSMutableDictionary dictionary];
-    
-    // 默认参数
+
     self.selectedNetworkMode = 0;
     self.bypassIAP = NO;
     self.jailbreakHide = YES;
     self.uaToggle = YES;
-    
-    // 初始化随机默认值
+
+    // 默认设备型号（随机）
+    NSArray *machines = [DeviceModels allMachineIdentifiers];
+    self.selectedMachine = machines[arc4random_uniform((uint32_t)machines.count)];
+
     [self randomizeAllParams];
-    
+
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.tableView];
-    
-    [self loadApps];
-}
-
-#pragma mark - 加载已安装 App
-- (void)loadApps {
-    [self.apps removeAllObjects];
-    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
-    if (workspaceClass) {
-        id workspace = [workspaceClass performSelector:NSSelectorFromString(@"defaultWorkspace")];
-        NSArray *all = [workspace performSelector:NSSelectorFromString(@"allInstalledApplications")];
-        for (id app in all) {
-            if ([[app valueForKey:@"applicationType"] isEqualToString:@"User"]) {
-                [self.apps addObject:app];
-            }
-        }
-    }
-    // 按名称排序
-    [self.apps sortUsingComparator:^NSComparisonResult(LSApplicationProxy *a, LSApplicationProxy *b) {
-        return [a.localizedShortName compare:b.localizedShortName];
-    }];
-    [self.tableView reloadData];
 }
 
 #pragma mark - 随机生成所有参数
 - (void)randomizeAllParams {
-    // 随机 SSID
     self.inputSSID = [NSString stringWithFormat:@"WiFi-%04X", arc4random_uniform(0xFFFF)];
-    // 随机 BSSID
     self.inputBSSID = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
                        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
                        arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
-    // 随机经纬度（中国范围内）
     self.inputLat = [NSString stringWithFormat:@"%.4f", 21.0 + (double)arc4random()/UINT32_MAX * 18.0];
     self.inputLon = [NSString stringWithFormat:@"%.4f", 100.0 + (double)arc4random()/UINT32_MAX * 20.0];
     self.inputRadius = [NSString stringWithFormat:@"%.1f", 1.0 + (double)arc4random()/UINT32_MAX * 20.0];
-    // 随机 UA
     NSArray *uaVersions = @[@"17.4", @"17.3", @"17.2", @"17.1", @"16.6", @"16.5", @"16.4", @"16.3"];
     NSString *ver = uaVersions[arc4random_uniform((uint32_t)uaVersions.count)];
     self.inputUA = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
                     [ver stringByReplacingOccurrencesOfString:@"." withString:@"_"]];
-    // 随机网络模式
     self.selectedNetworkMode = arc4random_uniform(7);
+    // 随机设备型号
+    NSArray *machines = [DeviceModels allMachineIdentifiers];
+    self.selectedMachine = machines[arc4random_uniform((uint32_t)machines.count)];
 }
 
 #pragma mark - TableView DataSource
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 6;
+    return 7;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
-        case 0: return @"📱 选择目标应用";
-        case 1: return @"📶 网络模式";
-        case 2: return @"📶 WiFi 伪装";
-        case 3: return @"📍 定位伪装";
-        case 4: return @"🔧 其他参数";
-        case 5: return @"🚀 操作";
+        case 0: return @"📱 目标应用";
+        case 1: return @"📱 设备型号";
+        case 2: return @"📶 网络模式";
+        case 3: return @"📶 WiFi 伪装";
+        case 4: return @"📍 定位伪装";
+        case 5: return @"🔧 其他参数";
+        case 6: return @"🚀 操作";
         default: return @"";
     }
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
-        case 0: return self.apps.count > 0 ? self.apps.count + 1 : 1;
-        case 1: return 7; // 7种网络模式
-        case 2: return 2; // SSID + BSSID
-        case 3: return 3; // 纬度 + 经度 + 半径
-        case 4: return 3; // 内购拦截 + 越狱隐藏 + UA篡改
-        case 5: return 2; // 一键抹机 + 随机生成全部
+        case 0: return 1;  // 单行入口
+        case 1: return 1;  // 单行入口
+        case 2: return 7;  // 7种网络模式
+        case 3: return 2;  // SSID + BSSID
+        case 4: return 3;  // 纬度 + 经度 + 半径
+        case 5: return 3;  // 内购 + 越狱 + UA
+        case 6: return 2;  // 抹机 + 随机全部
         default: return 0;
     }
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell;
-    
+
     switch (indexPath.section) {
         case 0: {
-            // 应用列表
-            if (indexPath.row == 0) {
-                // 刷新按钮
-                cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-                cell.textLabel.text = @"🔄 刷新应用列表";
-                cell.textLabel.textColor = [UIColor systemBlueColor];
-                cell.textLabel.textAlignment = NSTextAlignmentCenter;
-                return cell;
-            }
-            LSApplicationProxy *app = self.apps[indexPath.row - 1];
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-            cell.textLabel.text = app.localizedShortName ?: @"未知应用";
-            cell.detailTextLabel.text = app.bundleIdentifier;
-            cell.imageView.image = [UIImage _applicationIconImageForBundleIdentifier:app.bundleIdentifier format:2 scale:[UIScreen mainScreen].scale];
-            cell.imageView.layer.cornerRadius = 8;
-            cell.imageView.layer.masksToBounds = YES;
-            if (self.selectedApp && [self.selectedApp.bundleIdentifier isEqualToString:app.bundleIdentifier]) {
-                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+            // 目标应用 - 单行入口
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+            if (self.selectedApp) {
+                cell.textLabel.text = self.selectedApp.localizedShortName ?: @"未知";
+                cell.detailTextLabel.text = self.selectedApp.bundleIdentifier;
             } else {
-                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.textLabel.text = @"点击选择应用";
+                cell.detailTextLabel.text = @"未选择";
+                cell.textLabel.textColor = [UIColor systemGrayColor];
             }
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
         case 1: {
+            // 设备型号 - 单行入口
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+            NSDictionary *info = [DeviceModels deviceInfoForMachine:self.selectedMachine];
+            cell.textLabel.text = info[@"marketing_name"] ?: self.selectedMachine;
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", self.selectedMachine, info[@"soc"] ?: @"?"];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
+        case 2: {
             // 网络模式
             NSArray *modes = @[@"📶 正常", @"✈️ 飞行", @"📱 无卡", @"🟢 移动", @"🔵 联通", @"🟠 电信", @"📡 广电"];
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
@@ -236,7 +382,7 @@
             }
             return cell;
         }
-        case 2: {
+        case 3: {
             // SSID + BSSID
             EditableCell *editableCell = [[EditableCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
             editableCell.textField.placeholder = indexPath.row == 0 ? @"SSID (如 WiFi-7A3F)" : @"BSSID (如 aa:bb:cc:dd:ee:ff)";
@@ -258,19 +404,18 @@
             };
             return editableCell;
         }
-        case 3: {
+        case 4: {
             // 定位参数
             NSArray *placeholders = @[@"纬度 (如 39.9042)", @"经度 (如 116.4074)", @"漂移半径 (km)"];
             NSArray *values = @[self.inputLat ?: @"39.9042", self.inputLon ?: @"116.4074", self.inputRadius ?: @"5.0"];
             EditableCell *editableCell = [[EditableCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
             editableCell.textField.placeholder = placeholders[indexPath.row];
             editableCell.textField.text = values[indexPath.row];
-            editableCell.textField.keyboardType = indexPath.row == 2 ? UIKeyboardTypeDecimalPad : UIKeyboardTypeDecimalPad;
+            editableCell.textField.keyboardType = UIKeyboardTypeDecimalPad;
             editableCell.textField.tag = 200 + indexPath.row;
             editableCell.textField.delegate = self;
             __weak typeof(self) weakSelf = self;
             __weak EditableCell *weakCell = editableCell;
-            // 每个定位参数独立随机生成按钮
             editableCell.randomAction = ^{
                 double lat = 21.0 + (double)arc4random()/UINT32_MAX * 18.0;
                 double lon = 100.0 + (double)arc4random()/UINT32_MAX * 20.0;
@@ -288,7 +433,7 @@
             };
             return editableCell;
         }
-        case 4: {
+        case 5: {
             // 其他参数
             if (indexPath.row == 0) {
                 cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
@@ -301,7 +446,6 @@
                 cell.textLabel.textColor = self.jailbreakHide ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
                 return cell;
             } else {
-                // UA 带随机按钮
                 EditableCell *editableCell = [[EditableCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
                 editableCell.textField.placeholder = @"自定义 UA (留空使用默认)";
                 editableCell.textField.text = self.inputUA;
@@ -319,11 +463,11 @@
                 return editableCell;
             }
         }
-        case 5: {
+        case 6: {
             // 操作按钮
             if (indexPath.row == 0) {
                 cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-                cell.textLabel.text = @"🚀 一键抹机 (应用选中的 App)";
+                cell.textLabel.text = @"🚀 一键抹机";
                 cell.textLabel.textColor = [UIColor systemRedColor];
                 cell.textLabel.textAlignment = NSTextAlignmentCenter;
                 cell.textLabel.font = [UIFont boldSystemFontOfSize:17];
@@ -344,23 +488,37 @@
 #pragma mark - TableView Delegate
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
+
     switch (indexPath.section) {
         case 0: {
-            if (indexPath.row == 0) {
-                [self loadApps];
-                return;
-            }
-            self.selectedApp = self.apps[indexPath.row - 1];
-            [tableView reloadData];
+            // 进入 App 选择页
+            AppPickerViewController *picker = [[AppPickerViewController alloc] init];
+            __weak typeof(self) weakSelf = self;
+            picker.onSelected = ^(LSApplicationProxy *app) {
+                weakSelf.selectedApp = app;
+                [weakSelf.tableView reloadData];
+            };
+            [self.navigationController pushViewController:picker animated:YES];
             break;
         }
         case 1: {
+            // 进入设备型号选择页
+            DeviceModelPickerViewController *picker = [[DeviceModelPickerViewController alloc] init];
+            picker.selectedMachine = self.selectedMachine;
+            __weak typeof(self) weakSelf = self;
+            picker.onSelected = ^(NSString *machine) {
+                weakSelf.selectedMachine = machine;
+                [weakSelf.tableView reloadData];
+            };
+            [self.navigationController pushViewController:picker animated:YES];
+            break;
+        }
+        case 2: {
             self.selectedNetworkMode = indexPath.row;
             [tableView reloadData];
             break;
         }
-        case 4: {
+        case 5: {
             if (indexPath.row == 0) {
                 self.bypassIAP = !self.bypassIAP;
                 [tableView reloadData];
@@ -370,7 +528,7 @@
             }
             break;
         }
-        case 5: {
+        case 6: {
             if (indexPath.row == 0) {
                 [self executeWipe];
             } else {
@@ -406,34 +564,23 @@
 
 #pragma mark - 生成随机设备配置
 - (NSDictionary *)generateSeedProfile {
-    // 随机选择设备型号
-    NSArray *machines = @[
-        @"iPhone15,2", @"iPhone15,3", @"iPhone15,4", @"iPhone15,5",
-        @"iPhone14,5", @"iPhone14,6", @"iPhone14,7", @"iPhone14,8",
-        @"iPhone13,2", @"iPhone13,3", @"iPhone13,4",
-        @"iPhone12,1", @"iPhone12,3",
-    ];
-    NSString *machine = machines[arc4random_uniform((uint32_t)machines.count)];
+    NSString *machine = self.selectedMachine ?: @"iPhone15,2";
     NSDictionary *devInfo = [DeviceModels deviceInfoForMachine:machine];
-    
-    // 随机序列号
-    NSString *serial = [NSString stringWithFormat:@"F%@%@", 
+
+    NSString *serial = [NSString stringWithFormat:@"F%@%@",
         [NSString stringWithFormat:@"%c", (unichar)('A' + arc4random_uniform(26))],
         [NSString stringWithFormat:@"%011u", arc4random_uniform(999999999)]];
-    
-    // 随机 ECID
+
     NSString *ecid = [NSString stringWithFormat:@"%016llX", (unsigned long long)arc4random() << 32 | arc4random()];
-    
-    // 随机 WiFi MAC
+
     NSString *wifiMAC = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
         arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
         arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
-    
-    // 随机 Bluetooth MAC
+
     NSString *btMAC = [NSString stringWithFormat:@"%02X:%02X:%02X:%02X:%02X:%02X",
         arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
         arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
-    
+
     return @{
         @"MachineModel": machine,
         @"DisplayName": devInfo[@"marketing_name"] ?: machine,
@@ -463,10 +610,9 @@
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
-    
+
     NSString *bundleID = self.selectedApp.bundleIdentifier;
-    
-    // 构建配置
+
     NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:[self generateSeedProfile]];
     config[@"WifiSSID"] = self.inputSSID ?: @"WiFi-0000";
     config[@"WifiBSSID"] = self.inputBSSID ?: @"00:00:00:00:00:00";
@@ -476,30 +622,28 @@
     if (self.inputUA.length > 0) config[@"UserAgent"] = self.inputUA;
     config[@"BypassIAP"] = @(self.bypassIAP);
     config[@"JailbreakHide"] = @(self.jailbreakHide);
-    
-    // 网络模式
+
     NSArray *netModes = @[@"normal", @"flight", @"nosim", @"mobile", @"unicom", @"telecom", @"broadnet"];
     config[@"NetworkMode"] = netModes[self.selectedNetworkMode];
-    
-    // 运营商对应
+
     NSArray *carrierNames = @[@"中国移动", @"中国移动", @"", @"中国移动", @"中国联通", @"中国电信", @"中国广电"];
     NSArray *carrierMNCs = @[@"00", @"00", @"", @"00", @"01", @"03", @"15"];
     config[@"CarrierName"] = carrierNames[self.selectedNetworkMode];
     config[@"CarrierMNC"] = carrierMNCs[self.selectedNetworkMode];
     config[@"CarrierMCC"] = @"460";
-    
+
     UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"正在抹除..." message:@"请稍候" preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:loading animated:YES completion:nil];
-    
+
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         [WiperHelper performFullWipeForBundleID:bundleID];
-        
+
         NSString *configPath = [WiperHelper getConfigPathForBundleID:bundleID];
         NSString *dir = [configPath stringByDeletingLastPathComponent];
         [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
         [config writeToFile:configPath atomically:YES];
-        
+
         dispatch_async(dispatch_get_main_queue(), ^{
             [loading dismissViewControllerAnimated:YES completion:^{
                 UIAlertController *done = [UIAlertController alertControllerWithTitle:@"✅ 抹机完成"
