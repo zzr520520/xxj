@@ -1,4 +1,4 @@
-Package: com.custom.appwiper
+Package: com.dev.appwipe
 Name: AppWiper
 Depends: mobilesubstrate (>= 0.9.5000), preferenceloader
 Version: 2.08
